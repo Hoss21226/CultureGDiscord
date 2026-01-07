@@ -20,7 +20,7 @@ class QuizView(discord.ui.View):
         self.mode = mode
         self.answered = False
 
-       async def interaction_check(self, interaction: discord.Interaction) -> bool:
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
         """
         - mode 'quiz' : seul le joueur qui a lancé la commande peut répondre
         - mode 'daily' : tout le monde peut jouer

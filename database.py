@@ -218,7 +218,7 @@ class Database:
                 "total_correct": tc,
                 "streak": streak,
                 "best_streak": best,
-            )
+            }
 
     # ======================
     # WEEKLY TOP
@@ -238,3 +238,4 @@ class Database:
                 (limit,),
             )
             return c.fetchall()
+db = Database()
