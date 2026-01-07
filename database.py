@@ -1,14 +1,13 @@
-# database.py
-
 import sqlite3
 from typing import Optional, List, Tuple
 from datetime import datetime
 
 from questions import Question
+from question_sets import ALL_QUESTIONS  # <-- on importe toutes les questions
 
 
 class Database:
-    def __init__(self, path: str = "cultureg.db"):
+    def __init__(self, path: str = "culture.db"):
         self.path = path
         self._init_db()
 
@@ -19,7 +18,7 @@ class Database:
         with self._connect() as conn:
             c = conn.cursor()
 
-            # Joueurs
+            # TABLE UTILISATEURS
             c.execute(
                 """
                 CREATE TABLE IF NOT EXISTS users (
@@ -35,7 +34,7 @@ class Database:
                 """
             )
 
-            # Questions
+            # TABLE QUESTIONS
             c.execute(
                 """
                 CREATE TABLE IF NOT EXISTS questions (
@@ -53,14 +52,14 @@ class Database:
                 """
             )
 
-            # Logs de réponses (pour les stats quotidiennes / hebdo)
+            # LOGS DE RÉPONSES
             c.execute(
                 """
                 CREATE TABLE IF NOT EXISTS answer_logs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     discord_id INTEGER NOT NULL,
                     question_id INTEGER,
-                    mode TEXT NOT NULL,         -- 'quiz', 'duel', 'br', 'daily'
+                    mode TEXT NOT NULL,
                     correct INTEGER NOT NULL,
                     created_at TEXT NOT NULL
                 )
@@ -76,37 +75,7 @@ class Database:
         if count > 0:
             return
 
-        questions_data = [
-            (
-                "Histoire", "facile",
-                "En quelle année a débuté la Première Guerre mondiale ?",
-                "1912", "1914", "1916", "1918",
-                1,
-                "Elle commence en 1914 après l'attentat de Sarajevo.",
-            ),
-            (
-                "Géographie", "facile",
-                "Quel est le plus grand océan du monde ?",
-                "Atlantique", "Arctique", "Pacifique", "Indien",
-                2,
-                "L'océan Pacifique est le plus vaste.",
-            ),
-            (
-                "Informatique", "moyen",
-                "Quel protocole est utilisé pour la navigation web sécurisée ?",
-                "HTTP", "FTP", "SSH", "HTTPS",
-                3,
-                "HTTPS est la version sécurisée de HTTP via TLS/SSL.",
-            ),
-            (
-                "Sport", "facile",
-                "Combien de joueurs une équipe de football a-t-elle sur le terrain ?",
-                "9", "10", "11", "12",
-                2,
-                "Une équipe de foot a 11 joueurs sur le terrain.",
-            ),
-        ]
-
+        # On utilise les questions importées depuis question_sets/*
         cursor.executemany(
             """
             INSERT INTO questions (
@@ -115,132 +84,20 @@ class Database:
                 correct_index, explanation
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            questions_data,
+            ALL_QUESTIONS,
         )
 
-    # ================= USERS =================
-
-    def ensure_user(self, discord_id: int, username: str):
-        with self._connect() as conn:
-            c = conn.cursor()
-            c.execute(
-                "INSERT OR IGNORE INTO users (discord_id, username) VALUES (?, ?)",
-                (discord_id, username),
-            )
-            conn.commit()
-
-    def update_after_answer(
-        self,
-        discord_id: int,
-        username: str,
-        correct: bool,
-        question_id: Optional[int],
-        mode: str,
-    ):
-        self.ensure_user(discord_id, username)
-        now = datetime.utcnow().isoformat()
-
+    # ======================
+    # GET RANDOM QUESTION
+    # ======================
+    def get_random_question(self, category: Optional[str] = None, difficulty: Optional[str] = None) -> Optional[Question]:
         with self._connect() as conn:
             c = conn.cursor()
 
-            # log réponse
-            c.execute(
-                """
-                INSERT INTO answer_logs (discord_id, question_id, mode, correct, created_at)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (discord_id, question_id, mode, int(correct), now),
-            )
+            query = "SELECT * FROM questions"
+            params = []
 
-            # stats globales
-            c.execute(
-                """
-                SELECT xp, total_questions, total_correct, streak, best_streak
-                FROM users WHERE discord_id = ?
-                """,
-                (discord_id,),
-            )
-            row = c.fetchone()
-            xp, total_q, total_c, streak, best_streak = row
-
-            total_q += 1
-            if correct:
-                total_c += 1
-                xp += 10
-                streak += 1
-                if streak > best_streak:
-                    best_streak = streak
-            else:
-                streak = 0
-
-            c.execute(
-                """
-                UPDATE users
-                SET xp = ?, total_questions = ?, total_correct = ?,
-                    streak = ?, best_streak = ?, username = ?
-                WHERE discord_id = ?
-                """,
-                (xp, total_q, total_c, streak, best_streak, username, discord_id),
-            )
-            conn.commit()
-
-    def get_profile(self, discord_id: int) -> Optional[dict]:
-        with self._connect() as conn:
-            c = conn.cursor()
-            c.execute(
-                """
-                SELECT xp, total_questions, total_correct, streak, best_streak
-                FROM users WHERE discord_id = ?
-                """,
-                (discord_id,),
-            )
-            row = c.fetchone()
-            if not row:
-                return None
-            xp, total_q, total_c, streak, best_streak = row
-            accuracy = (total_c / total_q * 100) if total_q > 0 else 0.0
-            return {
-                "xp": xp,
-                "total_questions": total_q,
-                "total_correct": total_c,
-                "streak": streak,
-                "best_streak": best_streak,
-                "accuracy": accuracy,
-            }
-
-    def get_leaderboard(self, limit: int = 10) -> List[Tuple[int, str, int]]:
-        with self._connect() as conn:
-            c = conn.cursor()
-            c.execute(
-                """
-                SELECT discord_id, username, xp
-                FROM users
-                ORDER BY xp DESC
-                LIMIT ?
-                """,
-                (limit,),
-            )
-            return c.fetchall()
-
-    # ================= QUESTIONS =================
-
-    def get_random_question(
-        self,
-        category: Optional[str] = None,
-        difficulty: Optional[str] = None,
-    ) -> Optional[Question]:
-        with self._connect() as conn:
-            c = conn.cursor()
-
-            query = """
-                SELECT id, category, difficulty, question,
-                       choice_a, choice_b, choice_c, choice_d,
-                       correct_index, explanation
-                FROM questions
-            """
             conditions = []
-            params: List[str] = []
-
             if category:
                 conditions.append("category = ?")
                 params.append(category)
@@ -252,40 +109,128 @@ class Database:
                 query += " WHERE " + " AND ".join(conditions)
 
             query += " ORDER BY RANDOM() LIMIT 1"
+
             c.execute(query, params)
             row = c.fetchone()
+
             if not row:
                 return None
 
-            (
-                qid, category, difficulty, qtext,
-                a, b, c_, d,
-                idx, explanation,
-            ) = row
-
             return Question(
-                id=qid,
-                category=category,
-                difficulty=difficulty,
-                question=qtext,
-                choices=[a, b, c_, d],
-                correct_index=idx,
-                explanation=explanation,
+                id=row[0],
+                category=row[1],
+                difficulty=row[2],
+                question=row[3],
+                choices=[row[4], row[5], row[6], row[7]],
+                correct_index=row[8],
+                explanation=row[9],
             )
 
-    # ========== REPORTS ==========
+    # ======================
+    # UPDATE AFTER ANSWER
+    # ======================
+    def update_after_answer(self, discord_id: int, username: str, correct: bool, question_id: int, mode: str):
+        with self._connect() as conn:
+            c = conn.cursor()
 
-    def get_weekly_top(self, limit: int = 5) -> List[Tuple[int, int]]:
-        """
-        Retourne [(discord_id, bonnes_reponses_sur_la_semaine), ...]
-        """
+            # Log
+            c.execute(
+                """
+                INSERT INTO answer_logs (discord_id, question_id, mode, correct, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (discord_id, question_id, mode, int(correct), datetime.utcnow().isoformat()),
+            )
+
+            # User exist ?
+            c.execute("SELECT id, xp, total_questions, total_correct, streak, best_streak FROM users WHERE discord_id = ?", (discord_id,))
+            row = c.fetchone()
+
+            if not row:
+                streak = 1 if correct else 0
+                best = streak
+                c.execute(
+                    """
+                    INSERT INTO users (discord_id, username, xp, total_questions, total_correct, streak, best_streak)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (discord_id, username, 10 if correct else 0, 1, int(correct), streak, best),
+                )
+                return
+
+            # Update existing user
+            user_id, xp, tq, tc, streak, best = row
+
+            tq += 1
+            if correct:
+                xp += 10
+                tc += 1
+                streak += 1
+                best = max(best, streak)
+            else:
+                streak = 0
+
+            c.execute(
+                """
+                UPDATE users
+                SET username = ?, xp = ?, total_questions = ?, total_correct = ?, streak = ?, best_streak = ?
+                WHERE discord_id = ?
+                """,
+                (username, xp, tq, tc, streak, best, discord_id),
+            )
+
+    # ======================
+    # LEADERBOARD
+    # ======================
+    def get_leaderboard(self, limit: int = 10):
         with self._connect() as conn:
             c = conn.cursor()
             c.execute(
                 """
-                SELECT discord_id, SUM(correct) as score
+                SELECT discord_id, username, xp
+                FROM users ORDER BY xp DESC LIMIT ?
+                """,
+                (limit,),
+            )
+            return c.fetchall()
+
+    def get_profile(self, discord_id: int):
+        with self._connect() as conn:
+            c = conn.cursor()
+            c.execute(
+                """
+                SELECT xp, total_questions, total_correct, streak, best_streak
+                FROM users WHERE discord_id = ?
+                """,
+                (discord_id,),
+            )
+            row = c.fetchone()
+            if not row:
+                return None
+
+            xp, tq, tc, streak, best = row
+            accuracy = (tc / tq * 100) if tq > 0 else 0
+
+            return {
+                "xp": xp,
+                "accuracy": accuracy,
+                "total_questions": tq,
+                "total_correct": tc,
+                "streak": streak,
+                "best_streak": best,
+            )
+
+    # ======================
+    # WEEKLY TOP
+    # ======================
+    def get_weekly_top(self, limit: int = 5):
+        with self._connect() as conn:
+            c = conn.cursor()
+            c.execute(
+                """
+                SELECT discord_id, SUM(correct) AS score
                 FROM answer_logs
-                WHERE created_at >= datetime('now', '-7 days')
+                WHERE created_at >= date('now','-7 days')
                 GROUP BY discord_id
                 ORDER BY score DESC
                 LIMIT ?
@@ -293,6 +238,3 @@ class Database:
                 (limit,),
             )
             return c.fetchall()
-
-
-db = Database()

@@ -1,5 +1,31 @@
-.env
+# ───────────────
+# Python
+# ───────────────
 __pycache__/
 *.pyc
-cultureg.db
+*.pyo
+*.pyd
+*.log
 
+# venv / virtualenv
+env/
+venv/
+.venv/
+
+# ───────────────
+# VS Code
+# ───────────────
+.vscode/
+
+# ───────────────
+# Base de données SQLite
+# ───────────────
+culture.db
+*.db
+*.sqlite
+
+# ───────────────
+# Config sensible
+# ───────────────
+.env
+.env.local
